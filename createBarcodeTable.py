@@ -4,7 +4,7 @@ import json
 import re
 
 # create mapping of ngccm barcodes to ngccm unique ids from Kelvin's database csv file
-def generateBarcodeToUidMap(ngccm_database_file):
+def generateBarcodeToUidMap(ngccm_database_file, ngccm_json):
     ngccm_file = open(ngccm_database_file, 'r')
     uid_dict = {}
     barcode = 0
@@ -30,7 +30,7 @@ def generateBarcodeToUidMap(ngccm_database_file):
                 print "ngccm {0} : {1}".format(barcode, ngccm_uid)
                 uid_dict[barcode] = ngccm_uid
     ngccm_file.close()
-    with open("ngccm_cards/ngccm.json", 'w') as j:
+    with open(ngccm_json, 'w') as j:
         json.dump(uid_dict, j, sort_keys=True, indent=4)
     return uid_dict
 
@@ -107,35 +107,48 @@ def generateLocationToUidMap(qiecard_unique_id_file, ngccm_unique_id_file):
         json.dump(uid_dict, j, sort_keys=True, indent=4)
     return uid_dict
 
-def createTable(rm_json, cu_json, qiecard_unique_id_file, ngccm_unique_id_file):
-    # get mapping from detector location to unique id
+def createTable(rm_json, cu_json, ngccm_json, qiecard_unique_id_file, ngccm_unique_id_file):
+    # create mapping from ngccm barcode to ngccm uid
+    generateBarcodeToUidMap("ngccm_cards/ngCCM_sn.csv", ngccm_json)
+    # get mapping from detector location to unique id (RM, CU, ngCCM)
     uid_dict = generateLocationToUidMap(qiecard_unique_id_file, ngccm_unique_id_file)
     # load RM and CU json files
     with open(rm_json, 'r') as rm_j:
         rm_dict = json.load(rm_j) 
     with open(cu_json, 'r') as cu_j:
         cu_dict = json.load(cu_j) 
+    with open(ngccm_json, 'r') as ngccm_j:
+        ngccm_dict = json.load(ngccm_j) 
     # invert barcode to unique id mapping into uid to barcode map
     inv_rm_dict = {v: k for k, v in rm_dict.iteritems()}
     inv_cu_dict = {v: k for k, v in cu_dict.iteritems()}
+    inv_ngccm_dict = {v: k for k, v in ngccm_dict.iteritems()}
     # create map from decector location to barcode
     barcode_dict = {}
     n_rm_errors = 0
     n_cu_errors = 0
+    n_ngccm_errors = 0
     for location in uid_dict:
         uid = uid_dict[location]
         if "calib" in location:
             try:
                 barcode = inv_cu_dict[uid]
             except:
-                print "{0} with uid {1} is not found CU json file.".format(location, uid)
+                print "{0} with uid {1} is not found in {2}".format(location, uid, cu_json)
                 n_cu_errors += 1
+                continue
+        elif "ngccm" in location:
+            try:
+                barcode = inv_ngccm_dict[uid]
+            except:
+                print "{0} with uid {1} is not found in {2}".format(location, uid, ngccm_json)
+                n_ngccm_errors += 1
                 continue
         else:
             try:
                 barcode = inv_rm_dict[uid]
             except:
-                print "{0} with uid {1} is not found RM json file.".format(location, uid) 
+                print "{0} with uid {1} is not found in {2}".format(location, uid, rm_json)
                 n_rm_errors += 1
                 continue
         barcode_dict[location] = barcode
@@ -144,26 +157,28 @@ def createTable(rm_json, cu_json, qiecard_unique_id_file, ngccm_unique_id_file):
         json.dump(barcode_dict, j, sort_keys=True, indent=4)
     print "Number of RM errors: {0}".format(n_rm_errors)
     print "Number of CU errors: {0}".format(n_cu_errors)
+    print "Number of ngCCM errors: {0}".format(n_ngccm_errors)
     
     table = open("HE_Barcodes.txt", 'w')
-    row = ""
-    rowFormat = list("{%d:>5}" % i for i in xrange(6))
+    rowFormat = list("{%d:>5}" % i for i in xrange(7))
     row = "".join(rowFormat)
-    row = row.format("RBX", "RM1", "RM2", "RM3", "RM4", "CU")
+    row = row.format("RBX", "RM1", "RM2", "RM3", "RM4", "CU", "CCM")
     table.write(row + "\n")
     print row
     for side in ["HEP", "HEM"]:
         for rbx in xrange(1,19):
             rbxNum = str(rbx).zfill(2)
-            rbxName = "{0}{1}".format(side, rbxNum)
-            row = rbxName
-            for rm in xrange(1,6):
-                if rm == 5:
-                    rmName = "{0}-calib".format(rbxName)
+            rbxName = side + rbxNum
+            row = "{0:>5}".format(rbxName)
+            for i in xrange(1,7):
+                if i == 5:
+                    key = "{0}-calib".format(rbxName)
+                elif i == 6:
+                    key = "{0}-ngccm".format(rbxName)
                 else:
-                    rmName = "{0}-{1}".format(rbxName, rm)
+                    key = "{0}-{1}".format(rbxName, i)
                 try:
-                    barcode = barcode_dict[rmName]
+                    barcode = barcode_dict[key]
                 except:
                     barcode = 999
                 row += "{0:>5}".format(barcode)
@@ -174,8 +189,8 @@ def createTable(rm_json, cu_json, qiecard_unique_id_file, ngccm_unique_id_file):
     return
 
 if __name__ == "__main__":
-    #generateBarcodeToUidMap("ngccm_cards/ngCCM_sn.csv")
-    generateLocationToUidMap("qie_cards/HE_Unique_IDs.txt","ngccm_cards/HE_CCM_Unique_IDs.txt")
-    #createTable("qie_cards/rm.json", "qie_cards/cu.json", "qie_cards/HE_Unique_IDs.txt", "ngccm_cards/ngCCM_sn.csv")
+    #generateBarcodeToUidMap("ngccm_cards/ngCCM_sn.csv", "ngccm_cards/ngccm.json")
+    #generateLocationToUidMap("qie_cards/HE_Unique_IDs.txt","ngccm_cards/HE_CCM_Unique_IDs.txt")
+    createTable("qie_cards/rm.json", "qie_cards/cu.json", "ngccm_cards/ngccm.json", "qie_cards/HE_Unique_IDs.txt", "ngccm_cards/HE_CCM_Unique_IDs.txt")
 
 
