@@ -3,22 +3,58 @@
 import json
 import re
 
-# generateUidJson: return dictionary and output json mapping detector location to RM, CU and ngCCM unique id 
-# Examples:
+# create mapping of ngccm barcodes to ngccm unique ids from Kelvin's database csv file
+def generateBarcodeToUidMap(ngccm_database_file):
+    ngccm_file = open(ngccm_database_file, 'r')
+    uid_dict = {}
+    barcode = 0
+    ngccm_uid = ""
+    n = 0
+    for line in ngccm_file:
+        line = line.strip(" \r\n")
+        line = line.replace('"','')
+        s = line.split(";")
+        bc = int(s[0])
+        uid = s[1]
+        uid = uid[2:10].upper()
+        if barcode != bc:
+            n = 1
+            barcode = bc
+            ngccm_uid = uid
+            print "ngccm {0} card {1} : {2}".format(barcode, n, uid)
+        else:
+            n += 1
+            ngccm_uid += "_{0}".format(uid)
+            print "ngccm {0} card {1} : {2}".format(barcode, n, uid)
+            if n == 4:
+                print "ngccm {0} : {1}".format(barcode, ngccm_uid)
+                uid_dict[barcode] = ngccm_uid
+    ngccm_file.close()
+    with open("ngccm_cards/ngccm.json", 'w') as j:
+        json.dump(uid_dict, j, sort_keys=True, indent=4)
+    return uid_dict
+
+# generateLocationToUidMap: return dictionary and output json mapping detector location to RM, CU and ngCCM unique id 
+# Example Outputs:
 # "HEM03-4": "EABCC9_EA9D53_EAB3B0_EA9CD2"
 # "HEP18-calib": "EAA109"
-# "HEM11-ngccm": ""
+# "HEP15-ngccm": "28145393_284B9F93_287DC993_28032693"
 
-def generateUidJson(qiecard_unique_id_file, ngccm_unique_id_file):
-    uid_file = open(qiecard_unique_id_file, 'r')
+def generateLocationToUidMap(qiecard_unique_id_file, ngccm_unique_id_file):
+    qiecard_file = open(qiecard_unique_id_file, 'r')
+    ngccm_file = open(ngccm_unique_id_file, 'r')
     uid_dict = {}
+    
+    # create mapping for RM and CU location to Unique ID
     rm_prev = 0
     rm_uid = ""
-    for line in uid_file:
+    for line in qiecard_file:
         # add to dictionary
-        s = line.split(" : ")
-        location = s[0]
-        uid = s[1]
+        line = line.strip(" \r\n")
+        line = line.replace('"','')
+        s = line.split(":")
+        location = s[0].strip()
+        uid = s[1].strip()
         uid = uid.split(" ")[-1]
         uid = uid[2:8].upper()
         #print "{0} : {1}".format(location, uid)
@@ -26,27 +62,54 @@ def generateUidJson(qiecard_unique_id_file, ngccm_unique_id_file):
             uid_dict[location] = uid
         else:
             # Match HEP07-3-4
-            m = re.search('([A-Z]+)([0-9]+)-([0-9])-([0-9])', location)
+            m = re.search('([A-Z]+[0-9]+)-([0-9])-([0-9])', location)
             rbxName = m.group(1)
-            rbxNum  = m.group(2)
-            rm      = int(m.group(3))
-            card    = int(m.group(4))
+            rm      = int(m.group(2))
+            card    = int(m.group(3))
             if rm == rm_prev:
                 rm_uid += "_{0}".format(uid)
             else:
                 rm_uid = uid
                 rm_prev = rm 
             if card == 4:
-                rm_name = "{0}{1}-{2}".format(rbxName, rbxNum, rm)
+                rm_name = "{0}-{1}".format(rbxName, rm)
                 uid_dict[rm_name] = rm_uid
-    uid_file.close()
+    
+    # create mapping for ngCCM location to Unique ID
+    jslot = 0
+    ngccm_uid = ""
+    for line in ngccm_file:
+        line = line.strip(" \r\n")
+        line = line.replace('"','')
+        s = line.split(":")
+        location = s[0].strip()
+        uid = s[1].strip()
+        uid = uid[2:10].upper()
+        
+        # Match HEM18-J16_ID
+        m = re.search('([A-Z]+[0-9]+)-J([0-9]+)_ID', location)
+        rbxName = m.group(1)
+        jslot = int(m.group(2))
+        
+        print "{0}: {1} {2}: {3}".format(location, rbxName, jslot, uid)
+        
+        if jslot == 13:
+            ngccm_uid = uid
+        else:
+            ngccm_uid += "_{0}".format(uid)
+            if jslot == 16:
+                uid_dict["{0}-ngccm".format(rbxName)] = ngccm_uid
+
+    qiecard_file.close()
+    ngccm_file.close()
+    # dump unique id dictionary to json file
     with open("uid.json", 'w') as j:
         json.dump(uid_dict, j, sort_keys=True, indent=4)
     return uid_dict
 
 def createTable(rm_json, cu_json, qiecard_unique_id_file, ngccm_unique_id_file):
     # get mapping from detector location to unique id
-    uid_dict = generateUidJson(qiecard_unique_id_file, ngccm_unique_id_file)
+    uid_dict = generateLocationToUidMap(qiecard_unique_id_file, ngccm_unique_id_file)
     # load RM and CU json files
     with open(rm_json, 'r') as rm_j:
         rm_dict = json.load(rm_j) 
@@ -111,6 +174,8 @@ def createTable(rm_json, cu_json, qiecard_unique_id_file, ngccm_unique_id_file):
     return
 
 if __name__ == "__main__":
-    createTable("qie_cards/rm.json", "qie_cards/cu.json", "qie_cards/HE_Unique_IDs.txt", "ngccm_cards/ngCCM_sn.csv")
+    #generateBarcodeToUidMap("ngccm_cards/ngCCM_sn.csv")
+    generateLocationToUidMap("qie_cards/HE_Unique_IDs.txt","ngccm_cards/HE_CCM_Unique_IDs.txt")
+    #createTable("qie_cards/rm.json", "qie_cards/cu.json", "qie_cards/HE_Unique_IDs.txt", "ngccm_cards/ngCCM_sn.csv")
 
 
